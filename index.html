@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ Thống Quản Lý Lộ Trình NVBH</title>
+    
+    <!-- Thư viện Bản đồ Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- Thư viện đọc file Excel (SheetJS) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar điều khiển -->
+        <div class="sidebar">
+            <h2>Quản lý Lộ trình NVBH</h2>
+            
+            <!-- Đọc file Excel -->
+            <div class="control-group">
+                <h3>1. Dữ liệu Excel</h3>
+                <div class="file-import-box">
+                    <label for="excelFileInput">Chọn file Excel (.xls, .xlsx, .xlsb) để xem:</label>
+                    <input type="file" id="excelFileInput" accept=".xlsx, .xls, .xlsb">
+                    <small id="importStatus" role="status" aria-live="polite"></small>
+                </div>
+            </div>
+
+            <!-- Bộ lọc -->
+            <div class="control-group">
+                <h3>2. Bộ lọc dữ liệu</h3>
+                <label for="nvbhSelect">Gõ hoặc chọn theo mã / tên NVBH:</label>
+                <input id="nvbhSelect" type="text" list="nvbhOptions"
+                    placeholder="-- Tất cả NVBH --">
+                <datalist id="nvbhOptions"></datalist>
+                <label for="visitDateSelect">Lọc theo ngày viếng thăm:</label>
+                <input id="visitDateSelect" type="date" aria-label="Chọn ngày viếng thăm">
+                <small>Xóa ngày đã chọn để xem tất cả ngày.</small>
+                <button id="googleMapsRouteButton" class="btn" type="button" disabled>
+                    Mở tuyến trên Google Maps
+                </button>
+                <button id="readRouteButton" class="btn" type="button" disabled>
+                    Đọc lộ trình
+                </button>
+                <small id="readRouteStatus" role="status" aria-live="polite"></small>
+                <div id="googleMapsRouteLinks" aria-live="polite">
+                    Chọn đúng một mã/tên NVBH để xem tuyến và mở trên Google Maps.
+                </div>
+            </div>
+
+            <!-- Thống kê KPI -->
+            <div class="control-group kpi-box">
+                <h3>3. Thống kê nhanh</h3>
+                <p>Tổng điểm viếng thăm: <span id="kpiTotal">0</span></p>
+                <p>Điểm ngoài tuyến: <span id="kpiOffRoute">0</span></p>
+                <p class="map-legend"><span class="legend-marker in-route"></span>Trong tuyến
+                    <span class="legend-marker off-route"></span>Ngoài tuyến</p>
+                <p>Quãng đường ước tính: <span id="kpiDistance">0 km</span></p>
+            </div>
+        </div>
+
+        <!-- Bản đồ -->
+        <div class="map-container">
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
