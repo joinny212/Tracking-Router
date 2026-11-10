@@ -11,9 +11,6 @@ let polylineLayer = L.layerGroup().addTo(map);
 const canvasRenderer = L.canvas({ padding: 0.5 });
 let currentMapData = allData;
 let mapRenderVersion = 0;
-let routeReadIndex = 0;
-let routeReadVisits = [];
-let routeReadActive = false;
 
 // Dữ liệu mặc định ban đầu
 const defaultData = [
@@ -110,54 +107,24 @@ function parseVisitTime(value) {
     return hours * 3600 + minutes * 60 + seconds;
 }
 
-function stopRouteReading() {
-    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-    routeReadActive = false;
-    routeReadVisits = [];
-    routeReadIndex = 0;
-    const button = document.getElementById('readRouteButton');
-    const status = document.getElementById('readRouteStatus');
-    if (button) button.textContent = 'Đọc lộ trình';
-    if (status) status.textContent = '';
-}
+function formatVisitDuration(item) {
+    if (item.__format === 'route-master-1.8') return '';
 
-function speakNextRouteVisit() {
-    if (!routeReadActive || routeReadIndex >= routeReadVisits.length) {
-        routeReadActive = false;
-        document.getElementById('readRouteButton').textContent = 'Đọc lộ trình';
-        document.getElementById('readRouteStatus').textContent = 'Đã đọc xong lộ trình.';
-        return;
-    }
+    const checkIn = parseVisitTime(item["Check-in"] || item["Giờ Check-in"]);
+    const checkOut = parseVisitTime(item["Check-out"] || item["Giờ Check-out"]);
+    if (checkIn === null || checkOut === null) return '';
 
-    const { item, visitNumber } = routeReadVisits[routeReadIndex];
-    const customerName = item["Tên Khách Hàng"] ||
-        item["Tên Khách Hàng / Điểm Bán"] || 'Khách hàng';
-    const checkIn = item["Check-in"] || item["Giờ Check-in"];
-    const address = item["Địa Chỉ KH"];
-    const parts = [
-        `Điểm ${visitNumber}: ${customerName}.`,
-        checkIn && `Giờ viếng thăm ${checkIn}.`,
-        address && `Địa chỉ ${address}.`,
-        isOffRoute(item) && 'Điểm ngoài tuyến.'
-    ].filter(Boolean);
-    const utterance = new SpeechSynthesisUtterance(parts.join(' '));
-    utterance.lang = 'vi-VN';
-    utterance.onend = () => {
-        if (!routeReadActive) return;
-        routeReadIndex++;
-        speakNextRouteVisit();
-    };
-    utterance.onerror = event => {
-        if (!routeReadActive || event.error === 'canceled' || event.error === 'interrupted') return;
-        routeReadActive = false;
-        document.getElementById('readRouteButton').textContent = 'Đọc lộ trình';
-        document.getElementById('readRouteStatus').textContent =
-            'Trình duyệt không đọc được nội dung. Vui lòng thử lại.';
-    };
+    let duration = checkOut - checkIn;
+    if (duration < 0) duration += 24 * 60 * 60;
 
-    document.getElementById('readRouteStatus').textContent =
-        `Đang đọc điểm ${visitNumber} / ${routeReadVisits.length}: ${customerName}`;
-    window.speechSynthesis.speak(utterance);
+    const hours = Math.floor(duration / 3600);
+    const minutes = Math.floor((duration % 3600) / 60);
+    const seconds = duration % 60;
+    const parts = [];
+    if (hours) parts.push(`${hours} giờ`);
+    if (minutes) parts.push(`${minutes} phút`);
+    if (seconds || parts.length === 0) parts.push(`${seconds} giây`);
+    return parts.join(' ');
 }
 
 function isOffRoute(item) {
@@ -188,6 +155,11 @@ function findCell(row, headerMap, ...names) {
     return '';
 }
 
+function isScheduledDay(value) {
+    const normalized = normalizeHeader(value);
+    return normalized !== '' && !['0', 'false', 'no', 'n', 'khong', '-'].includes(normalized);
+}
+
 function parseVisitSheet(worksheet) {
     const rows = XLSX.utils.sheet_to_json(worksheet, {
         header: 1,
@@ -197,30 +169,45 @@ function parseVisitSheet(worksheet) {
     });
     const headerIndex = rows.findIndex(row => {
         const headers = new Set(row.map(normalizeHeader));
-        const hasCustomerName = headers.has('tenkhachhang') ||
+        const hasCustomerName = headers.has('tenkhachhang') || headers.has('tenkh') ||
             headers.has('tenkhachhangdiemban');
         const hasLocation = headers.has('gpscheckin') ||
             headers.has('gpscheckout') ||
             (headers.has('vidolat') || headers.has('vido')) &&
             (headers.has('kinhdolng') || headers.has('kinhdo'));
-        return headers.has('makhachhang') && hasCustomerName && hasLocation;
+        return (headers.has('makhachhang') || headers.has('makh')) &&
+            hasCustomerName && hasLocation;
     });
 
     if (headerIndex < 0) {
         throw new Error('Không tìm thấy dòng tiêu đề có Mã Khách Hàng, Tên Khách Hàng và tọa độ GPS.');
     }
 
+    const headers = new Set(rows[headerIndex].map(normalizeHeader));
+    const isRouteMaster = headers.has('makh') && headers.has('tenkh') &&
+        headers.has('manv');
     const headerMap = new Map(
         rows[headerIndex].map((header, index) => [normalizeHeader(header), index])
     );
+    const scheduleColumns = [
+        ['Chủ Nhật', 0],
+        ['Thứ 2', 1],
+        ['Thứ 3', 2],
+        ['Thứ 4', 3],
+        ['Thứ 5', 4],
+        ['Thứ 6', 5],
+        ['Thứ 7', 6]
+    ];
 
     return rows.slice(headerIndex + 1)
         .filter(row => row.some(value => String(value).trim() !== ''))
         .map(row => ({
             'STT': findCell(row, headerMap, 'STT'),
-            'Mã Khách Hàng': findCell(row, headerMap, 'Mã Khách Hàng'),
-            'Tên Khách Hàng': findCell(row, headerMap, 'Tên Khách Hàng'),
-            'Địa Chỉ KH': findCell(row, headerMap, 'Địa Chỉ KH', 'Địa Chỉ Khách Hàng'),
+            'Mã Khách Hàng': findCell(row, headerMap, 'Mã Khách Hàng', 'Mã KH'),
+            'Tên Khách Hàng': findCell(row, headerMap, 'Tên Khách Hàng', 'Tên KH'),
+            'Địa Chỉ KH': findCell(
+                row, headerMap, 'Địa Chỉ KH', 'Địa Chỉ Khách Hàng', 'Địa Chỉ'
+            ),
             'Ngày Viếng Thăm': findCell(row, headerMap, 'Ngày Viếng Thăm'),
             'Check-in': findCell(row, headerMap, 'Check-in', 'Giờ Check-in'),
             'Check-out': findCell(row, headerMap, 'Check-out', 'Giờ Check-out'),
@@ -235,8 +222,8 @@ function parseVisitSheet(worksheet) {
             'GPS Check-in': findCell(row, headerMap, 'GPS Check-in'),
             'GPS Check-out': findCell(row, headerMap, 'GPS Check-out'),
             'Khoảng cách': findCell(row, headerMap, 'Khoảng cách'),
-            'Mã NVBH': findCell(row, headerMap, 'Mã NVBH', 'Mã Nhân Viên'),
-            'Tên NVBH': findCell(row, headerMap, 'Tên NVBH', 'Tên Nhân Viên'),
+            'Mã NVBH': findCell(row, headerMap, 'Mã NVBH', 'Mã Nhân Viên', 'Mã NV'),
+            'Tên NVBH': findCell(row, headerMap, 'Tên NVBH', 'Tên Nhân Viên', 'Tên NV'),
             'Vĩ Độ (Lat)': findCell(row, headerMap, 'Vĩ Độ (Lat)', 'Vĩ Độ', 'Latitude', 'Lat'),
             'Kinh Độ (Lng)': findCell(row, headerMap, 'Kinh Độ (Lng)', 'Kinh Độ', 'Longitude', 'Lng'),
             'Tên Khách Hàng / Điểm Bán': findCell(
@@ -245,7 +232,15 @@ function parseVisitSheet(worksheet) {
             'Giờ Check-in': findCell(row, headerMap, 'Giờ Check-in'),
             'Giờ Check-out': findCell(row, headerMap, 'Giờ Check-out'),
             'Trạng Thái': findCell(row, headerMap, 'Trạng Thái'),
-            'Ghi Chú Viếng Thăm': findCell(row, headerMap, 'Ghi Chú Viếng Thăm')
+            'Ghi Chú Viếng Thăm': findCell(row, headerMap, 'Ghi Chú Viếng Thăm'),
+            '__format': isRouteMaster ? 'route-master-1.8' : 'visit-report',
+            '__frequency': findCell(row, headerMap, 'Tần Suất'),
+            '__visitWeek': findCell(row, headerMap, 'Tuần Viếng Thăm'),
+            '__visitDays': isRouteMaster
+                ? scheduleColumns
+                    .filter(([header]) => isScheduledDay(findCell(row, headerMap, header)))
+                    .map(([, day]) => day)
+                : []
         }));
 }
 
@@ -281,16 +276,19 @@ function loadDataToMap(data, drawRoute = false) {
             if (b.visitTime === null) return -1;
             return a.visitTime - b.visitTime || a.originalIndex - b.originalIndex;
         });
+    const isRouteMaster = orderedData.some(
+        ({ item }) => item.__format === 'route-master-1.8'
+    );
 
     return new Promise((resolve, reject) => {
         const latLngs = [];
         const markerBounds = L.latLngBounds([]);
         let totalDist = 0;
         let visitCount = 0;
+        let pointCount = 0;
         let offRouteCount = 0;
         let previousCoordinate = null;
         let index = 0;
-
         function renderBatch() {
             if (renderVersion !== mapRenderVersion) {
                 resolve();
@@ -303,15 +301,17 @@ function loadDataToMap(data, drawRoute = false) {
                     const { item, visitTime } = orderedData[index];
                     const coordinates = getVisitCoordinates(item);
                     if (!coordinates) continue;
+                    pointCount++;
                     markerBounds.extend(coordinates);
 
                     const customerName = item["Tên Khách Hàng"] ||
                         item["Tên Khách Hàng / Điểm Bán"] || "Khách hàng";
-                    const hasVisitTime = visitTime !== null;
+                    const isRouteStop = isRouteMaster || visitTime !== null;
                     const offRoute = isOffRoute(item);
-                    const visitNumber = hasVisitTime ? ++visitCount : null;
+                    const visitNumber = isRouteStop ? ++visitCount : null;
+                    const visitDuration = formatVisitDuration(item);
 
-                    if (hasVisitTime) {
+                    if (isRouteStop) {
                         if (offRoute) offRouteCount++;
                         if (drawRoute) {
                             if (previousCoordinate) {
@@ -330,10 +330,10 @@ function loadDataToMap(data, drawRoute = false) {
                         radius: 10,
                         color: '#fff',
                         weight: 2,
-                        fillColor: offRoute ? '#f28c28' : hasVisitTime ? '#007bff' : '#6c757d',
+                        fillColor: offRoute ? '#dc3545' : isRouteStop ? '#007bff' : '#6c757d',
                         fillOpacity: 1
                     });
-                    if (drawRoute && hasVisitTime) {
+                    if (drawRoute && isRouteStop) {
                         marker.bindTooltip(String(visitNumber), {
                             permanent: true,
                             direction: 'top',
@@ -342,7 +342,7 @@ function loadDataToMap(data, drawRoute = false) {
                         });
                     }
                     marker.bindPopup(() => [
-                        hasVisitTime
+                        isRouteStop
                             ? `<b>Lượt viếng thăm #${visitNumber}: ${escapeHtml(customerName)}</b>`
                             : `<b>${escapeHtml(customerName)} (không có giờ check-in, không tính thứ tự)</b>`,
                         offRoute && '<b>Điểm ngoài tuyến</b>',
@@ -356,6 +356,8 @@ function loadDataToMap(data, drawRoute = false) {
                             `Ngày viếng thăm: ${escapeHtml(item["Ngày Viếng Thăm"])}`,
                         `Check-in: ${escapeHtml(item["Check-in"] || item["Giờ Check-in"] || "--")}`,
                         `Check-out: ${escapeHtml(item["Check-out"] || item["Giờ Check-out"] || "--")}`,
+                        visitDuration &&
+                            `Thời gian viếng thăm: ${visitDuration}`,
                         item["Đóng Cửa"] && `Đóng cửa: ${escapeHtml(item["Đóng Cửa"])}`,
                         item["Lý Do"] && `Lý do: ${escapeHtml(item["Lý Do"])}`,
                         item["Trong Tuyến"] && `Trong tuyến: ${escapeHtml(item["Trong Tuyến"])}`,
@@ -371,7 +373,16 @@ function loadDataToMap(data, drawRoute = false) {
                             `Khoảng cách: ${escapeHtml(item["Khoảng cách"])}`,
                         item["Trạng Thái"] && `Trạng thái: ${escapeHtml(item["Trạng Thái"])}`,
                         item["Ghi Chú Viếng Thăm"] &&
-                            `Ghi chú: ${escapeHtml(item["Ghi Chú Viếng Thăm"])}`
+                            `Ghi chú: ${escapeHtml(item["Ghi Chú Viếng Thăm"])}`,
+                        item["__frequency"] &&
+                            `Tần suất: ${escapeHtml(item["__frequency"])}`,
+                        item["__visitWeek"] &&
+                            `Tuần viếng thăm: ${escapeHtml(item["__visitWeek"])}`,
+                        item["__visitDays"]?.length &&
+                            `Ngày viếng thăm: ${item["__visitDays"].map(day => [
+                                'Chủ Nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4',
+                                'Thứ 5', 'Thứ 6', 'Thứ 7'
+                            ][day]).join(', ')}`
                     ].filter(Boolean).join('<br>'));
                     markersLayer.addLayer(marker);
                 }
@@ -384,13 +395,7 @@ function loadDataToMap(data, drawRoute = false) {
                     return;
                 }
 
-                if (!drawRoute) {
-                    if (markerBounds.isValid()) {
-                        map.fitBounds(markerBounds, { padding: [30, 30], maxZoom: 12 });
-                    }
-                }
-
-                if (drawRoute && latLngs.length > 1) {
+                if (drawRoute && !isRouteMaster && latLngs.length > 1) {
                     const polyline = L.polyline(latLngs, {
                         renderer: canvasRenderer,
                         color: '#007bff',
@@ -399,9 +404,15 @@ function loadDataToMap(data, drawRoute = false) {
                     });
                     polylineLayer.addLayer(polyline);
                     map.fitBounds(polyline.getBounds(), { padding: [50, 50] });
+                } else if (markerBounds.isValid()) {
+                    map.fitBounds(markerBounds, { padding: [30, 30], maxZoom: 12 });
                 }
 
-                document.getElementById('kpiTotal').innerText = visitCount;
+                document.getElementById('kpiTotalLabel').textContent = isRouteMaster
+                    ? 'Tổng điểm khách hàng:'
+                    : 'Tổng điểm viếng thăm:';
+                document.getElementById('kpiTotal').innerText =
+                    isRouteMaster ? pointCount : visitCount;
                 document.getElementById('kpiOffRoute').innerText = offRouteCount;
                 document.getElementById('kpiDistance').innerText = totalDist.toFixed(2) + " km";
                 resolve();
@@ -415,6 +426,51 @@ function loadDataToMap(data, drawRoute = false) {
 }
 
 // 3. Cập nhật gợi ý mã và tên nhân viên
+function getLargeRouteEmployees(data) {
+    if (!data.some(item => item.__format === 'route-master-1.8')) return [];
+
+    const employees = new Map();
+    data.forEach(item => {
+        if (!getVisitCoordinates(item)) return;
+        const key = getEmployeeKey(item);
+        const employee = employees.get(key) || {
+            key,
+            code: String(item["Mã NVBH"] || '').trim(),
+            name: String(item["Tên NVBH"] || '').trim(),
+            count: 0
+        };
+        employee.count++;
+        employees.set(key, employee);
+    });
+
+    return [...employees.values()]
+        .filter(employee => employee.count > 30)
+        .sort((a, b) => b.count - a.count);
+}
+
+function updateRouteSizeWarnings(data) {
+    const warning = document.getElementById('routeSizeWarnings');
+    const largeRoutes = getLargeRouteEmployees(data);
+    warning.replaceChildren();
+    warning.hidden = largeRoutes.length === 0;
+    if (largeRoutes.length === 0) return;
+
+    const heading = document.createElement('strong');
+    heading.textContent = 'Cảnh báo: NVBH có tuyến trên 30 điểm';
+    warning.append(heading);
+    largeRoutes.forEach(employee => {
+        const button = document.createElement('button');
+        const label = [employee.code, employee.name].filter(Boolean).join(' - ');
+        button.type = 'button';
+        button.textContent = `${label}: ${employee.count} khách hàng`;
+        button.addEventListener('click', () => {
+            document.getElementById('nvbhSelect').value = label;
+            applyFilters();
+        });
+        warning.append(button);
+    });
+}
+
 function updateSelectOptions(data) {
     const input = document.getElementById('nvbhSelect');
     const options = document.getElementById('nvbhOptions');
@@ -427,6 +483,7 @@ function updateSelectOptions(data) {
     });
     options.replaceChildren();
     input.value = '';
+    updateRouteSizeWarnings(data);
 
     if (employees.size === 0) {
         input.placeholder = 'File không có thông tin NVBH';
@@ -466,21 +523,31 @@ function findSelectedEmployee(query) {
     return matches.size === 1 ? [...matches][0] : null;
 }
 
+function scheduleIncludesDate(item, selectedDate) {
+    if (!selectedDate) return true;
+    if (item.__format !== 'route-master-1.8') {
+        return normalizeVisitDate(item["Ngày Viếng Thăm"]) === selectedDate;
+    }
+
+    const weekday = new Date(`${selectedDate}T00:00:00`).getDay();
+    return item.__visitDays.includes(weekday);
+}
+
 function applyFilters() {
-    stopRouteReading();
     const employeeQuery = document.getElementById('nvbhSelect')
         .value.trim().toLocaleLowerCase();
     const selectedDate = document.getElementById('visitDateSelect').value;
     const selectedEmployee = findSelectedEmployee(employeeQuery);
     const routeButton = document.getElementById('googleMapsRouteButton');
-    const readRouteButton = document.getElementById('readRouteButton');
     const routeLinks = document.getElementById('googleMapsRouteLinks');
+    const isRouteMaster = allData.some(item => item.__format === 'route-master-1.8');
     routeButton.disabled = !selectedEmployee;
-    readRouteButton.disabled = !selectedEmployee;
     routeLinks.replaceChildren();
-    routeLinks.textContent = selectedEmployee
-        ? ''
-        : 'Chọn đúng một mã/tên NVBH để xem tuyến và mở trên Google Maps.';
+    routeLinks.textContent = isRouteMaster
+        ? 'Tuyến 1.8 dùng thứ tự khách hàng trong file Excel.'
+        : selectedEmployee
+            ? ''
+            : 'Chọn đúng một mã/tên NVBH để xem tuyến và mở trên Google Maps.';
 
     const filtered = allData.filter(item => {
         const employee = [
@@ -488,8 +555,7 @@ function applyFilters() {
             String(item["Tên NVBH"] || '').trim()
         ].filter(Boolean).join(' - ').toLocaleLowerCase();
         const matchesEmployee = !employeeQuery || employee.includes(employeeQuery);
-        const matchesDate = !selectedDate ||
-            normalizeVisitDate(item["Ngày Viếng Thăm"]) === selectedDate;
+        const matchesDate = scheduleIncludesDate(item, selectedDate);
         return matchesEmployee && matchesDate;
     });
 
@@ -563,40 +629,6 @@ document.getElementById('nvbhSelect').addEventListener('keydown', (event) => {
 });
 document.getElementById('visitDateSelect').addEventListener('change', applyFilters);
 
-document.getElementById('readRouteButton').addEventListener('click', () => {
-    if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
-        document.getElementById('readRouteStatus').textContent =
-            'Trình duyệt này không hỗ trợ đọc văn bản.';
-        return;
-    }
-
-    if (routeReadActive) {
-        stopRouteReading();
-        return;
-    }
-
-    routeReadVisits = currentMapData
-        .map((item, originalIndex) => ({
-            item,
-            originalIndex,
-            visitTime: parseVisitTime(item["Check-in"] || item["Giờ Check-in"])
-        }))
-        .filter(visit => visit.visitTime !== null)
-        .sort((a, b) => a.visitTime - b.visitTime || a.originalIndex - b.originalIndex)
-        .map((visit, index) => ({ item: visit.item, visitNumber: index + 1 }));
-
-    if (routeReadVisits.length === 0) {
-        document.getElementById('readRouteStatus').textContent =
-            'Không có điểm nào có giờ check-in để đọc.';
-        return;
-    }
-
-    routeReadIndex = 0;
-    routeReadActive = true;
-    document.getElementById('readRouteButton').textContent = 'Dừng đọc';
-    speakNextRouteVisit();
-});
-
 document.getElementById('googleMapsRouteButton').addEventListener('click', () => {
     if (!findSelectedEmployee(
         document.getElementById('nvbhSelect').value.trim().toLocaleLowerCase()
@@ -604,19 +636,27 @@ document.getElementById('googleMapsRouteButton').addEventListener('click', () =>
         return;
     }
 
+    const isRouteMaster = currentMapData.some(
+        item => item.__format === 'route-master-1.8'
+    );
     const visits = currentMapData
         .map((item, originalIndex) => ({
             coordinates: getVisitCoordinates(item),
             visitTime: parseVisitTime(item["Check-in"] || item["Giờ Check-in"]),
             originalIndex
         }))
-        .filter(visit => visit.coordinates && visit.visitTime !== null)
-        .sort((a, b) => a.visitTime - b.visitTime || a.originalIndex - b.originalIndex);
+        .filter(visit => visit.coordinates &&
+            (isRouteMaster || visit.visitTime !== null))
+        .sort((a, b) => isRouteMaster
+            ? a.originalIndex - b.originalIndex
+            : a.visitTime - b.visitTime || a.originalIndex - b.originalIndex);
     const linksContainer = document.getElementById('googleMapsRouteLinks');
     linksContainer.replaceChildren();
 
     if (visits.length === 0) {
-        linksContainer.textContent = 'Không có điểm nào vừa có tọa độ vừa có giờ check-in.';
+        linksContainer.textContent = isRouteMaster
+            ? 'NVBH này không có khách hàng với tọa độ hợp lệ để mở trên Google Maps.'
+            : 'Không có điểm nào vừa có tọa độ vừa có giờ check-in.';
         return;
     }
 

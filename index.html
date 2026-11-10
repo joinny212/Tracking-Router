@@ -43,16 +43,13 @@
                 <input id="nvbhSelect" type="text" list="nvbhOptions"
                     placeholder="-- Tất cả NVBH --">
                 <datalist id="nvbhOptions"></datalist>
+                <div id="routeSizeWarnings" class="route-size-warnings" role="status" aria-live="polite" hidden></div>
                 <label for="visitDateSelect">Lọc theo ngày viếng thăm:</label>
                 <input id="visitDateSelect" type="date" aria-label="Chọn ngày viếng thăm">
                 <small>Xóa ngày đã chọn để xem tất cả ngày.</small>
                 <button id="googleMapsRouteButton" class="btn" type="button" disabled>
                     Mở tuyến trên Google Maps
                 </button>
-                <button id="readRouteButton" class="btn" type="button" disabled>
-                    Đọc lộ trình
-                </button>
-                <small id="readRouteStatus" role="status" aria-live="polite"></small>
                 <div id="googleMapsRouteLinks" aria-live="polite">
                     Chọn đúng một mã/tên NVBH để xem tuyến và mở trên Google Maps.
                 </div>
@@ -61,7 +58,7 @@
             <!-- Thống kê KPI -->
             <div class="control-group kpi-box">
                 <h3>3. Thống kê nhanh</h3>
-                <p>Tổng điểm viếng thăm: <span id="kpiTotal">0</span></p>
+                <p><span id="kpiTotalLabel">Tổng điểm viếng thăm:</span> <span id="kpiTotal">0</span></p>
                 <p>Điểm ngoài tuyến: <span id="kpiOffRoute">0</span></p>
                 <p class="map-legend"><span class="legend-marker in-route"></span>Trong tuyến
                     <span class="legend-marker off-route"></span>Ngoài tuyến</p>

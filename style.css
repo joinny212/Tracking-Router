@@ -31,6 +31,29 @@ body { height: 100vh; overflow: hidden; }
 #googleMapsRouteButton:disabled { background: #9aa8bd; cursor: not-allowed; }
 #googleMapsRouteLinks a { display: block; margin-bottom: 8px; color: #1a73e8; font-size: 13px; }
 #googleMapsRouteLinks { color: #666; font-size: 12px; line-height: 1.4; }
+.route-size-warnings {
+    margin: 0 0 10px;
+    padding: 10px;
+    border: 1px solid #e0b400;
+    border-radius: 4px;
+    background: #fff3cd;
+    color: #664d03;
+    font-size: 12px;
+    line-height: 1.4;
+}
+.route-size-warnings strong { display: block; margin-bottom: 5px; }
+.route-size-warnings button {
+    display: block;
+    width: 100%;
+    margin-top: 4px;
+    padding: 5px 7px;
+    border: 1px solid #e0b400;
+    border-radius: 3px;
+    background: #ffec99;
+    color: #664d03;
+    text-align: left;
+    cursor: pointer;
+}
 .visit-number-label { border: 0; background: rgba(255, 255, 255, 0.9); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); color: #172033; font-size: 11px; font-weight: 700; }
 .visit-number-label::before { display: none; }
 
@@ -42,7 +65,36 @@ body { height: 100vh; overflow: hidden; }
 .kpi-box .map-legend { display: flex; align-items: center; gap: 5px; color: #666; }
 .legend-marker { width: 10px; height: 10px; display: inline-block; border-radius: 50%; }
 .legend-marker.in-route { background: #007bff; }
-.legend-marker.off-route { background: #f28c28; margin-left: 8px; }
+.legend-marker.off-route { background: #dc3545; margin-left: 8px; }
 
 .map-container { flex-grow: 1; height: 100%; }
 #map { width: 100%; height: 100%; }
+
+@media (max-width: 768px) {
+    body {
+        height: auto;
+        min-height: 100vh;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
+
+    .app-container {
+        flex-direction: column;
+        width: 100%;
+        height: auto;
+        min-height: 100vh;
+    }
+
+    .sidebar {
+        width: 100%;
+        overflow: visible;
+        border-right: 0;
+        border-bottom: 1px solid #ddd;
+    }
+
+    .map-container {
+        flex: none;
+        height: 55vh;
+        min-height: 350px;
+    }
+}
